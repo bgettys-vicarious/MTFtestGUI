@@ -53,8 +53,7 @@ class ImagesAndStage:
         string_distance = str(current_distance)
         file_name_current_time =  'MTF_' + str(self.title) + '_' + dateTimeObj.strftime("%d-%b-%Y-%H-%M-%S") + '_distance_' + string_distance + '.png'
         # generate an intelligible file name
-        cd_command = 'cd ' + self.save_loc
-        os.system(cd_command)
+
         command_cap = "ffmpeg -y -i " + self.tcp + " -f image2 -frames:v 1 " + file_name_current_time
         os.system(command_cap)
         return file_name_current_time

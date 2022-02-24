@@ -1,6 +1,8 @@
 from zaber_motion import Library
 from zaber_motion.ascii import Connection
 from zaber_motion import Units
+from zaber_motion.ascii import AxisSettings
+
 import glob
 import sys
 import numpy as np
@@ -37,7 +39,10 @@ class axis:
 		self.ax.settings.set("maxspeed", speed, Units.VELOCITY_MILLIMETRES_PER_SECOND)
 	def get_pos(self):
 		return self.ax.get_position()/self.scale*150
-
+	def get_max(self):
+		return self.ax.settings.get("limit.max", Units.LENGTH_MILLIMETRES)
+	def get_min(self):
+		return self.ax.settings.get("limit.min", Units.LENGTH_MILLIMETRES)
 class gauntry:
 	def __init__(self, _async=False):
 		connection = Connection.open_serial_port(PORT)
@@ -65,7 +70,7 @@ class gauntry:
 	def move(self, z, y, x):
 		self.z.move_to(z)
 		self.y.move_to(y)
-		self.x.move_to(200-x)
+		self.x.move_to(x)
 
 
 # g = gauntry()
