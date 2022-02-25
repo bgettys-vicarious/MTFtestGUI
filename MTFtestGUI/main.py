@@ -37,6 +37,7 @@ def excel_read_config(loc_config):
     CloseArea = ImageArea(input_stage_one_near, input_focus_one, input_stage_one_far)
     FarArea = ImageArea(input_stage_two_near, input_focus_two, input_stage_two_far)
     AreaList = [CloseArea, FarArea]
+    print(num_picts) #fixme we don't want to print this forever - remove when things function
     return AreaList, num_picts
 
 
@@ -263,7 +264,7 @@ def GUI_window():
               [sg.Button("Start Jetson Stream"), sg.Checkbox('Jetson is Already Streaming', default=False, key="JetsonAlreadyRunning"), sg.Button("Play Video")],
               [sg.Text('Name your test (alpha numeric + underscores only)'), sg.InputText(key="t_title")],
               [sg.Text("Choose a folder to save in: "), sg.FolderBrowse(key="save_path")],
-              [sg.Checkbox('Use Config File', default=False, key="config_file_use"), sg.Text("Choose a file: "), sg.FileBrowse(key="config_file_loc")],
+              [sg.Checkbox('Use Config File', default=False, key="config_file_use", enable_events=True), sg.Text("Choose a file: "), sg.FileBrowse(key="config_file_loc")],
               [sg.Text('Focus Distance 1'), sg.InputText(key="fd1")],
               [sg.Text('Stage Location - Near - Focus Distance One'),  sg.InputText(key="fd1sln")],
               [sg.Text('Stage Location - Far - Focus Distance One'),  sg.InputText(key="fd1slf")],
@@ -280,8 +281,7 @@ def GUI_window():
     # Create an event loop
     while True:
         event, values = window.read()
-        # End program if user closes window or
-        # presses the OK button
+        #print(event, values)
 
         if event == "Start Jetson Stream":
             # need to do an SSH connection here
@@ -291,7 +291,7 @@ def GUI_window():
             view_state = our_comp.view_state
             SSH_state = 1
 
-        if event == "Play Video":
+        if event == "Play Video": #used to be if
             if 'view_state' in locals():  # if this has even been created
                 if view_state == 0:
                     # instantiate a view object
@@ -311,43 +311,58 @@ def GUI_window():
                 else:
                     print("you haven't RUN the stream yet, goofball")
 
-        if event == "Enter Settings and Commence Test":
-            test_title = values["t_title"]
-            save_to = values["save_path"]
+        if event == "config_file_use":
             if values['config_file_use'] is True:
                 # if we are using the config file b/c the checkbox is checked
                 # disable GUI we aren't using so we don't confuse people
                 input_fields_config = ["fd1", "fd1sln", "fd1slf", "fd2", "fd2sln", "fd2slf", "num_picts_needed"]
                 for element_key in input_fields_config:
-                    window.FindElement(element_key).Update(disabled=True)  # update all those fields to disabled
+                    #window[element_key].Update(disabled=True)  # update all those fields to disabled
+                    window.Element(element_key).Update(disabled=True)
+                window.Element("config_file_loc").Update(disabled=False)
 
-                # actually import things
-                loc_xlsx = values['config_file_loc']
-                [AreaList, num_picts] = excel_read_config(loc_xlsx)
 
-            else:
-                # if we are manually inputting values (go get them from the GUI and put them into these vars)
+
+            if values['config_file_use'] is False:
+                input_fields_config = ["fd1", "fd1sln", "fd1slf", "fd2", "fd2sln", "fd2slf", "num_picts_needed"]
+                for element_key in input_fields_config:
+                    window.Element(element_key).Update(disabled=False)  # update all those fields to disabled
+                window.Element("config_file_loc").Update(disabled=True)
+
+        if event == "config_file_loc":  #and values['config_file_use'] is True:  # if we then press the browse button, we load values
+            print('browse pressed')
+
+
+        if event == "Enter Settings and Commence Test":
+            test_title = values["t_title"]
+            save_to = values["save_path"]
+
+            if values['config_file_use'] is True:  # if the checkbox is checked, we are using the config file
+                if values['config_file_loc'] == '':  # you haven't loaded a file if it's an empty string
+                    print('you need to load a config file before we can do anything')
+                else:   # if you have loaded a file, the path will not me an empty string, so we can use an else
+                    loc_xlsx = values['config_file_loc']
+                    [AreaList, number_of_images] = excel_read_config(loc_xlsx)
+
+            elif values["config_file_use"] is False:  # if the checkbox is not checked, we are entering values by hand
                 input_focus_one = values["fd1"]
                 input_stage_one_near = values["fd1sln"]
                 input_stage_one_far = values["fd1slf"]
                 input_focus_two = values["fd2"]
                 input_stage_two_near = values["fd2sln"]
                 input_stage_two_far = values["fd2slf"]
-                num_picts = int(values["num_picts_needed"])
+                number_of_images = int(values["num_picts_needed"])
                 CloseArea = ImageArea(input_stage_one_near, input_focus_one, input_stage_one_far)
                 FarArea = ImageArea(input_stage_two_near, input_focus_two, input_stage_two_far)
                 AreaList = [CloseArea, FarArea]
 
-            ImagesAndStage(test_title, save_to, where_network, SSH_session, AreaList, num_picts)
+            ImagesAndStage(test_title, save_to, where_network, SSH_session, AreaList, number_of_images)
 
         if event == sg.WIN_CLOSED:
             if 'SSH_session' in locals():
-                SSH_session.logout()
-                window.close()
-            else:
-                window.close()
+                 SSH_session.logout()
             window.close()
-
+            return
 
 # call the window!!
 if __name__ == '__main__':
