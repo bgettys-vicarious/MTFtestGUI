@@ -5,7 +5,10 @@ import time
 #import serdes
 import vlc
 #import pexpect
-from pexpect import pxssh
+#from pexpect import pxssh
+import paramiko
+import paramiko_expect
+
 import numpy as np
 from zaber_drive import gauntry
 import PySimpleGUI as sg
@@ -48,10 +51,11 @@ def excel_read_config(loc_config):
     return AreaList, num_picts
 
 class FocusStuff:
-    def __init__(self, filepath):
+    def __init__(self, SSH_session, filepath, where_serdes):
         self.table_path = filepath
         self.table_data = self.focus_json_to_coords(self.read_focus_json(filepath))
-
+        self.SSH = SSH_session
+        self.serdes_path = where_serdes
 
     def read_focus_json(self, filepath):
         with open(filepath, "r") as f:
@@ -100,30 +104,63 @@ class FocusStuff:
             i = i + 1
         return [left_focus_command, right_focus_command]
 
-    def set_focus(self, SSH_session, x_distance):
+    def set_focus(self, x_distance, serdes_path): #maybe don't need serdes path here
         # get values and set variables elegantly for readable/refactorable code
-        focus_values = self.find_focus(self, x_distance)
-        focus_value_left = focus_values[0]
-        focus_value_right = focus_values[1]
-        mySSH = SSH_session
-        mySSH.sendline('sudo python3 serdes.py set_focus:{},{}'.format(focus_value_left, focus_value_right))
-        # this is why we need SSH session
-        # fixme set_focus needs implementation see autofocus.py
-        pass
+        focus_values = self.find_focus(x_distance) # bercause this is in mm
+        focus_value_left = int(focus_values[0])
+        focus_value_right = int(focus_values[1])
+        command_to_send = 'sudo python3 ' + self.serdes_path + ' set_focus:{},{}'.format(focus_value_left, focus_value_right)
+        print(command_to_send)
+        ssh_stdin, ssh_stdout, ssh_stderr = self.SSH.exec_command(command_to_send)
+        output = ssh_stdout.read()
+        if 'with args' in str(output):
+            pass
+            #print("yay")
+        else:
+            #print("nay")
+            raise Exception("something went wrong. Xavier says:"+chr(str(output)))
+        # old pexpect support stuff here
+        # # self.SSH.sendline(command_to_send)
+        # outcome = self.SSH.expect(['password', 'set_focus with args', 'No such file or'], timeout= 10)
+        #
+        # if outcome == 0:
+        #     self.SSH.sendline('VSrocks!')
+        #     outcome2 = self.SSH.expect(['set_focus with args', 'No such file or'])
+        #     if outcome2 == 0:
+        #         #everything is happy
+        #         pass
+        #     if outcome == 1:
+        #         raise Exception("looks like you have the wrong file")
+        #
+        # if outcome == 1:
+        #     print(self.SSH.readline(10))
+        #     #everything is happy
+        #     pass
+        # if outcome == 2:
+        #     raise Exception("looks like you have the wrong file")
+        # else:
+        #     print(outcome)
+        #     raise Exception("no return or timeout:")
+        #
+        # print(self.SSH.readline(10))
+        # pass
+
 
 class ImagesAndStage:
     # feed me LIST of each location you'd like to take a picture at FOR A GIVEN FOCAL plane (near limit, focal plane, far limit)
-    def __init__(self, test_title, save_to, where_network, AreaList, SSH_session, num_picts, focus_path):
+    def __init__(self, test_title, save_to, where_network, AreaList, SSH_session, num_picts, focus_path, where_serdes):
         # gauntry initialization
         self.xyz_stage = gauntry()
-        self.xyz_stage.home()
+        #removing to make testing faster - needs to go back in
+        #self.xyz_stage.home()
         # set up with y centered (for now - eventually, do something differe)
         min_y = self.xyz_stage.y.get_min()
         length_y = self.xyz_stage.y.get_max() - min_y
         dist_y = length_y/2
-        self.xyz_stage.y.move_to(min_y + dist_y)
-        # set up at arbitrary height (100mm)
-        self.xyz_stage.z.move_to(100)
+        #only to make debug faster
+        # self.xyz_stage.y.move_to(min_y + dist_y)
+        # # set up at arbitrary height (100mm)
+        # self.xyz_stage.z.move_to(100)
         # networking support
         self.title = test_title
         self.save_loc = str(save_to)
@@ -131,7 +168,7 @@ class ImagesAndStage:
         self.repeats = num_picts
         self.SSH_session = SSH_session
         self.tcp = "tcp://" + where_network + ":5558"
-        self.focus = FocusStuff(focus_path)
+        self.focus = FocusStuff(SSH_session, focus_path, where_serdes)
         # GO take our pictures
         self.capture()
 
@@ -147,50 +184,52 @@ class ImagesAndStage:
         return file_name_current_time
 
     def move_stage(self, x_distance):
-        print('moving to' + str(x_distance))
+        #print('moving to' + str(x_distance))
         self.xyz_stage.x.move_to(x_distance)  # move x axis to where it needs to be
 
 
 
     # overall motion/image capture behavior for the class
-    # working_distances =[int(2), int(4)]
     def capture(self):
+        sleep_time = float (.3)
         for each_area in self.areas:
             # on plane
             print("about to move to focal plane:" + str(each_area.focal))
             self.move_stage(each_area.focal)
-            print("setting focus")
-            self.focus.set_focus(self.SSH_session,each_area.focal)
-            print("saving image")
+            self.focus.set_focus(each_area.focal, self.focus.serdes_path) # used to be self.focus.serdes_path)
 
-            for n in range(self.repeats):  # take this number of images
+            print("saving image while focused on plane")
+            for n in range(int(self.repeats)):  # take this number of images
                 self.save_image(each_area.focal)
-                time.sleep(.3)  # wait .3 between captures)
+                time.sleep(sleep_time)  # wait .3 between captures)
             print("all images for this location saved")
+            time.sleep(sleep_time)
 
             # near
             print("about to move to near location:" + str(each_area.near))
             self.move_stage(each_area.near)
             print("saving image")
-            for n in range(self.repeats):  # take this number of images
+            for n in range(int(self.repeats)):  # take this number of images
                 self.save_image(each_area.focal)
-                time.sleep(.1)  # wait .3 between captures)
+                time.sleep(sleep_time)  # wait .3 between captures)
             print("all images for this location saved")
-
+            time.sleep(sleep_time)
             # far
             print("about to move to far location:" + str(each_area.far))
             self.move_stage(each_area.far)
             print("saving image")
-            for n in range(self.repeats):  # take this number of images
+            for n in range(int(self.repeats)):  # take this number of images
                 self.save_image(each_area.focal)
-                time.sleep(.3)  # wait .3 between captures)
+                time.sleep(sleep_time)  # wait .3 between captures)
             print("all images for this location saved")
+            time.sleep(sleep_time)
 
 # play video, open SSH if needed
 class View:
     def __init__(self, test_window, network_loc):
         self.address = network_loc
         self.window = test_window
+
 
     def Play(self):
         address_stream = 'tcp://' + self.address + ':5558'  # no slashes in your input or else this will error #fixme needs error handling
@@ -206,16 +245,22 @@ class View:
         player.play()
 
     def OpenSSH(self):
-        # connect to the Jetson if we need to
-        s = pxssh.pxssh()  # see https://pexpect.readthedocs.io/en/3.x/api/pxssh.html for help - this is an extension of spawn and inherits from it
-        s.login(self.address, username="vs", password="VSrocks!", sync_multiplier=5, login_timeout=15)
-        return s
+        # # connect to the Jetson if we need to
+        # s = pxssh.pxssh()  # see https://pexpect.readthedocs.io/en/3.x/api/pxssh.html for help - this is an extension of spawn and inherits from it
+        # s.login(self.address, username="vs", password="VSrocks!", sync_multiplier=5, login_timeout=15)
+        # return s
 
+        s = paramiko.SSHClient()  #https://stackoverflow.com/questions/373639/running-interactive-commands-in-paramiko
+        #https://stackoverflow.com/questions/13851846/paramiko-sftpclient-setting-missing-host-key-policy
+        s.set_missing_host_key_policy(paramiko.AutoAddPolicy())  # this allows us to nlot worry about missing key
+        s.connect(self.address, username="vs", password="VSrocks!")
+        return s
 
 def GUI_window():
     column_left = [[sg.Image('', size=(1164, 872), key='live_image')]]
-    column_right = [[sg.Text("Select your MTF Test Configuration")],
+    column_right = [[sg.Text("Select your MTF Test Configuration (distances are in mm)")],
               [sg.Text('Jetson Target (name-here.local without any tcp: or port'), sg.InputText(key="targ_address")],
+                    [sg.Text('serdes path starting with a slash /' ), sg.InputText(key="serdes_path")],
               [sg.Button("Play Video and Open SSH Connection")],
               [sg.Text("Load a JSON focus calibration file"), sg.FileBrowse(key="focus_table_loc")],
               [sg.Text('Name your test (alpha numeric + underscores only)'), sg.InputText(key="t_title")],
@@ -241,11 +286,13 @@ def GUI_window():
 
         if event == "Play Video and Open SSH Connection":
             where_network = values["targ_address"]
+            where_serdes = values["serdes_path"]
             viewing = View(window, where_network)
-            print('before play command')
+            #print('before play command')
             viewing.Play()  # actually play
             SSH_session = viewing.OpenSSH() #get SSH
-            print('supposedly playing')
+
+            #print('supposedly playing')
 
         if event == "config_file_use":
             if values['config_file_use'] is True:
@@ -269,8 +316,8 @@ def GUI_window():
 
 
         if event == "Enter Settings and Commence Test":
-            focus_calibration = FocusStuff((values['focus_table_loc'])) # create our focus_calibration object
-            #focus_calibration_table = focus_calibration.data
+           # focus_calibration = FocusStuff((values['focus_table_loc'])) # create our focus_calibration object
+            focus_calibration_table = values['focus_table_loc']
             test_title = values["t_title"]
             save_to = values["save_path"]
 
@@ -293,8 +340,7 @@ def GUI_window():
                 FarArea = ImageArea(input_stage_two_near, input_focus_two, input_stage_two_far)
                 AreaList = [CloseArea, FarArea]
 
-            ImagesAndStage(test_title, save_to, where_network,  AreaList, SSH_session, number_of_images, focus_calibration) #SSH_session
-
+            ImagesAndStage(test_title, save_to, where_network,  AreaList, SSH_session, number_of_images, focus_calibration_table, where_serdes)
         if event == sg.WIN_CLOSED:
             if 'SSH_session' in locals():
                  SSH_session.logout()
