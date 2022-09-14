@@ -37,18 +37,20 @@ class ImageArea:
 def excel_read_config(loc_config):
     df = pd.read_excel(loc_config, usecols=[1])  # this is a data frame object
     # note: first ROW is Vera number and is not used! it starts counting from the first int in row 2, which is #0 in this data structure
-    input_focus_one = float(df.values[0])
-    input_stage_one_near = float(df.values[1])
-    input_stage_one_far = float(df.values[2])
-    input_focus_two = float(df.values[3])
-    input_stage_two_near = float(df.values[4])
-    input_stage_two_far = float(df.values[5])
-    num_picts = float(df.values[6])
+    address = chr(df.values[0])
+    serdes_home = chr(df.values[1])
+    input_focus_one = float(df.values[2])
+    input_stage_one_near = float(df.values[3])
+    input_stage_one_far = float(df.values[4])
+    input_focus_two = float(df.values[5])
+    input_stage_two_near = float(df.values[6])
+    input_stage_two_far = float(df.values[7])
+    num_picts = float(df.values[8])
     CloseArea = ImageArea(input_stage_one_near, input_focus_one, input_stage_one_far)
     FarArea = ImageArea(input_stage_two_near, input_focus_two, input_stage_two_far)
     AreaList = [CloseArea, FarArea]
     print(num_picts) #fixme we don't want to print this forever - remove when things function
-    return AreaList, num_picts
+    return address, serdes_home, AreaList, num_picts
 
 class FocusStuff:
     def __init__(self, SSH_session, filepath, where_serdes):
@@ -152,15 +154,14 @@ class ImagesAndStage:
         # gauntry initialization
         self.xyz_stage = gauntry()
         #removing to make testing faster - needs to go back in
-        #self.xyz_stage.home()
+        self.xyz_stage.home()
         # set up with y centered (for now - eventually, do something differe)
         min_y = self.xyz_stage.y.get_min()
         length_y = self.xyz_stage.y.get_max() - min_y
         dist_y = length_y/2
-        #only to make debug faster
-        # self.xyz_stage.y.move_to(min_y + dist_y)
+        self.xyz_stage.y.move_to(min_y + dist_y)
         # # set up at arbitrary height (100mm)
-        # self.xyz_stage.z.move_to(100)
+        self.xyz_stage.z.move_to(100)
         # networking support
         self.title = test_title
         self.save_loc = str(save_to)
@@ -261,7 +262,7 @@ def GUI_window():
     column_right = [[sg.Text("Select your MTF Test Configuration (distances are in mm)")],
               [sg.Text('Jetson Target (name-here.local without any tcp: or port'), sg.InputText(key="targ_address")],
                     [sg.Text('serdes path starting with a slash /' ), sg.InputText(key="serdes_path")],
-              [sg.Button("Play Video and Open SSH Connection")],
+              [sg.Button("Play Video and Open SSH Connection", key="playandssh")],
               [sg.Text("Load a JSON focus calibration file"), sg.FileBrowse(key="focus_table_loc")],
               [sg.Text('Name your test (alpha numeric + underscores only)'), sg.InputText(key="t_title")],
               [sg.Text("Choose a folder to save in: "), sg.FolderBrowse(key="save_path")],
@@ -298,7 +299,7 @@ def GUI_window():
             if values['config_file_use'] is True:
                 # if we are using the config file b/c the checkbox is checked
                 # disable GUI we aren't using so we don't confuse people
-                input_fields_config = ["fd1", "fd1sln", "fd1slf", "fd2", "fd2sln", "fd2slf", "num_picts_needed"]
+                input_fields_config = ["fd1", "fd1sln", "fd1slf", "fd2", "fd2sln", "fd2slf", "num_picts_needed", "targ_address", "serdes_path", "playandssh"]
                 for element_key in input_fields_config:
                     #window[element_key].Update(disabled=True)  # update all those fields to disabled
                     window.Element(element_key).Update(disabled=True)
@@ -326,7 +327,11 @@ def GUI_window():
                     print('you need to load a config file before we can do anything')
                 else:   # if you have loaded a file, the path will not me an empty string, so we can use an else
                     loc_xlsx = values['config_file_loc']
-                    [AreaList, number_of_images] = excel_read_config(loc_xlsx)
+                    [where_network, where_serdes, AreaList, number_of_images] = excel_read_config(loc_xlsx)
+                    viewing = View(window, where_network)
+                    # print('before play command')
+                    viewing.Play()  # actually play
+                    SSH_session = viewing.OpenSSH()  # get SSH
 
             elif values["config_file_use"] is False:  # if the checkbox is not checked, we are entering values by hand
                 input_focus_one = values["fd1"]
@@ -340,7 +345,10 @@ def GUI_window():
                 FarArea = ImageArea(input_stage_two_near, input_focus_two, input_stage_two_far)
                 AreaList = [CloseArea, FarArea]
 
+
+
             ImagesAndStage(test_title, save_to, where_network,  AreaList, SSH_session, number_of_images, focus_calibration_table, where_serdes)
+
         if event == sg.WIN_CLOSED:
             if 'SSH_session' in locals():
                  SSH_session.logout()
