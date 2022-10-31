@@ -37,8 +37,10 @@ class ImageArea:
 def excel_read_config(loc_config):
     df = pd.read_excel(loc_config, usecols=[1])  # this is a data frame object
     # note: first ROW is Vera number and is not used! it starts counting from the first int in row 2, which is #0 in this data structure
-    address = chr(df.values[0])
-    serdes_home = chr(df.values[1])
+    address = str(df.values[0])
+    address = address[2:-2] #we do this to get rid of the [' '] from np array
+    serdes_home = str(df.values[1])
+    serdes_home = serdes_home [2:-2]
     input_focus_one = float(df.values[2])
     input_stage_one_near = float(df.values[3])
     input_stage_one_far = float(df.values[4])
@@ -66,8 +68,9 @@ class FocusStuff:
         return j
 
     def focus_json_to_coords(self, curve_json):
+       # curve_json = {"focus_lookup": curve_json}
         distance = np.array(
-            [int(float(dist)) for dist in sorted(curve_json["focus_lookup"].keys())],
+            [int(float(dist)) for dist in sorted(curve_json["focus_lookup"].keys())], #sorted(curve_json["focus_lookup"].keys())], #note, this assumes dict w/in dict called "focus_table"
             dtype=float,
         )
 
@@ -108,7 +111,7 @@ class FocusStuff:
 
     def set_focus(self, x_distance, serdes_path): #maybe don't need serdes path here
         # get values and set variables elegantly for readable/refactorable code
-        focus_values = self.find_focus(x_distance) # bercause this is in mm
+        focus_values = self.find_focus(int(x_distance)) # bercause this is in mm
         focus_value_left = int(focus_values[0])
         focus_value_right = int(focus_values[1])
         command_to_send = 'sudo python3 ' + self.serdes_path + ' set_focus:{},{}'.format(focus_value_left, focus_value_right)
@@ -120,33 +123,7 @@ class FocusStuff:
             #print("yay")
         else:
             #print("nay")
-            raise Exception("something went wrong. Xavier says:"+chr(str(output)))
-        # old pexpect support stuff here
-        # # self.SSH.sendline(command_to_send)
-        # outcome = self.SSH.expect(['password', 'set_focus with args', 'No such file or'], timeout= 10)
-        #
-        # if outcome == 0:
-        #     self.SSH.sendline('VSrocks!')
-        #     outcome2 = self.SSH.expect(['set_focus with args', 'No such file or'])
-        #     if outcome2 == 0:
-        #         #everything is happy
-        #         pass
-        #     if outcome == 1:
-        #         raise Exception("looks like you have the wrong file")
-        #
-        # if outcome == 1:
-        #     print(self.SSH.readline(10))
-        #     #everything is happy
-        #     pass
-        # if outcome == 2:
-        #     raise Exception("looks like you have the wrong file")
-        # else:
-        #     print(outcome)
-        #     raise Exception("no return or timeout:")
-        #
-        # print(self.SSH.readline(10))
-        # pass
-
+            raise Exception("something went wrong. Xavier says:" + (str(output)))
 
 class ImagesAndStage:
     # feed me LIST of each location you'd like to take a picture at FOR A GIVEN FOCAL plane (near limit, focal plane, far limit)
@@ -161,7 +138,7 @@ class ImagesAndStage:
         dist_y = length_y/2
         self.xyz_stage.y.move_to(min_y + dist_y)
         # # set up at arbitrary height (100mm)
-        self.xyz_stage.z.move_to(100)
+        self.xyz_stage.z.move_to(self.xyz_stage.z.get_max())
         # networking support
         self.title = test_title
         self.save_loc = str(save_to)
@@ -173,20 +150,23 @@ class ImagesAndStage:
         # GO take our pictures
         self.capture()
 
-    def save_image(self, current_distance):
+    def save_image(self, current_focal_distance, current_location):
         # makes a file name using the test title & a timestamp
         dateTimeObj = datetime.now()
-        string_distance = str(current_distance)
-        file_name_current_time = 'MTF_' + str(self.title) + '_' + dateTimeObj.strftime("%d-%b-%Y-%H-%M-%S") + '_distance_' + string_distance + '.png'
+        string_focal_distance = str(current_focal_distance)
+        string_location = str(current_location)
+        file_name_current_time =  ('MTF_' + str(self.title) + '_' + dateTimeObj.strftime("%d-%b-%Y-%H-%M-%S") +
+         '_distance_' +"_focused_on_" + string_focal_distance + "_stage_loc_" + string_location + '.png')
         # generate an intelligible file name
 
-        command_cap = "ffmpeg -y -i " + self.tcp + " -f image2 -frames:v 1 " + file_name_current_time
+        command_cap = "ffmpeg -y -i " + self.tcp + " -f image2 -frames:v 1 " + self.save_loc + "/" + file_name_current_time
+        print(self.save_loc)
         os.system(command_cap)
         return file_name_current_time
 
     def move_stage(self, x_distance):
         #print('moving to' + str(x_distance))
-        self.xyz_stage.x.move_to(x_distance)  # move x axis to where it needs to be
+        self.xyz_stage.x.move_to(self.xyz_stage.x.get_max() - (x_distance))  # move x axis to where it needs to be
 
 
 
@@ -198,32 +178,36 @@ class ImagesAndStage:
             print("about to move to focal plane:" + str(each_area.focal))
             self.move_stage(each_area.focal)
             self.focus.set_focus(each_area.focal, self.focus.serdes_path) # used to be self.focus.serdes_path)
-
+            time.sleep(10)
             print("saving image while focused on plane")
             for n in range(int(self.repeats)):  # take this number of images
-                self.save_image(each_area.focal)
+                self.save_image(each_area.focal,each_area.focal)
                 time.sleep(sleep_time)  # wait .3 between captures)
             print("all images for this location saved")
             time.sleep(sleep_time)
-
+            time.sleep(10)
             # near
             print("about to move to near location:" + str(each_area.near))
             self.move_stage(each_area.near)
+            time.sleep(3)
             print("saving image")
             for n in range(int(self.repeats)):  # take this number of images
-                self.save_image(each_area.focal)
+                self.save_image(each_area.focal, each_area.near)
                 time.sleep(sleep_time)  # wait .3 between captures)
             print("all images for this location saved")
             time.sleep(sleep_time)
             # far
             print("about to move to far location:" + str(each_area.far))
+            time.sleep(10)
             self.move_stage(each_area.far)
+            time.sleep(3)
             print("saving image")
             for n in range(int(self.repeats)):  # take this number of images
-                self.save_image(each_area.focal)
+                self.save_image(each_area.focal, each_area.far)
                 time.sleep(sleep_time)  # wait .3 between captures)
             print("all images for this location saved")
             time.sleep(sleep_time)
+        print("done saving")
 
 # play video, open SSH if needed
 class View:
@@ -260,21 +244,22 @@ class View:
 def GUI_window():
     column_left = [[sg.Image('', size=(1164, 872), key='live_image')]]
     column_right = [[sg.Text("Select your MTF Test Configuration (distances are in mm)")],
-              [sg.Text('Jetson Target (name-here.local without any tcp: or port'), sg.InputText(key="targ_address")],
+                    [sg.Checkbox('Use Config File', default=False, key="config_file_use", enable_events=True),
+                     sg.Text("Choose a file: "), sg.FileBrowse(key="config_file_loc")],
+                    [sg.Text('Jetson Target (name-here.local without any tcp: or port'), sg.InputText(key="targ_address")],
                     [sg.Text('serdes path starting with a slash /' ), sg.InputText(key="serdes_path")],
-              [sg.Button("Play Video and Open SSH Connection", key="playandssh")],
-              [sg.Text("Load a JSON focus calibration file"), sg.FileBrowse(key="focus_table_loc")],
-              [sg.Text('Name your test (alpha numeric + underscores only)'), sg.InputText(key="t_title")],
-              [sg.Text("Choose a folder to save in: "), sg.FolderBrowse(key="save_path")],
-              [sg.Checkbox('Use Config File', default=False, key="config_file_use", enable_events=True), sg.Text("Choose a file: "), sg.FileBrowse(key="config_file_loc")],
-              [sg.Text('Focus Distance 1'), sg.InputText(key="fd1")],
-              [sg.Text('Stage Location - Near - Focus Distance One'),  sg.InputText(key="fd1sln")],
-              [sg.Text('Stage Location - Far - Focus Distance One'),  sg.InputText(key="fd1slf")],
-              [sg.Text('Focus Distance 2'), sg.InputText(key="fd2")],
-              [sg.Text('Stage Location - Near - Focus Distance Two'), sg.InputText(key="fd2sln")],
-              [sg.Text('Stage Location - Far - Focus Distance Two'), sg.InputText(key="fd2slf")],
-              [sg.Text('Number of Pictures Per Location'), sg.InputText(key="num_picts_needed")],
-              [sg.Button("Enter Settings and Commence Test")]]
+                    [sg.Button("Play Video and Open SSH Connection", key="playandssh")],
+                    [sg.Text("Load a JSON focus calibration file"), sg.FileBrowse(key="focus_table_loc")],
+                    [sg.Text('Name your test (alpha numeric + underscores only)'), sg.InputText(key="t_title")],
+                    [sg.Text("Choose a folder to save in: "), sg.FolderBrowse(key="save_path")],
+                    [sg.Text('Focus Distance 1'), sg.InputText(key="fd1")],
+                    [sg.Text('Stage Location - Near - Focus Distance One'),  sg.InputText(key="fd1sln")],
+                    [sg.Text('Stage Location - Far - Focus Distance One'),  sg.InputText(key="fd1slf")],
+                    [sg.Text('Focus Distance 2'), sg.InputText(key="fd2")],
+                    [sg.Text('Stage Location - Near - Focus Distance Two'), sg.InputText(key="fd2sln")],
+                    [sg.Text('Stage Location - Far - Focus Distance Two'), sg.InputText(key="fd2slf")],
+                    [sg.Text('Number of Pictures Per Location'), sg.InputText(key="num_picts_needed")],
+                    [sg.Button("Enter Settings and Commence Test")]]
     layout = [[sg.Column(column_left, element_justification='c'), sg.Column(column_right, element_justification='l')]]
     # cookbook https://pysimplegui.readthedocs.io/en/latest/cookbook/#getting-started-copy-these-design-patterns
 
@@ -285,11 +270,12 @@ def GUI_window():
         event, values = window.read()
         #print(event, values)
 
-        if event == "Play Video and Open SSH Connection":
+        if event == "playandssh":
+            print('play video pressed')
             where_network = values["targ_address"]
             where_serdes = values["serdes_path"]
             viewing = View(window, where_network)
-            #print('before play command')
+            print('before play command')
             viewing.Play()  # actually play
             SSH_session = viewing.OpenSSH() #get SSH
 
@@ -315,6 +301,8 @@ def GUI_window():
         if event == "config_file_loc":  #and values['config_file_use'] is True:  # if we then press the browse button, we load values
             pass
 
+        if event == "manual_y_location_set":
+            pass
 
         if event == "Enter Settings and Commence Test":
            # focus_calibration = FocusStuff((values['focus_table_loc'])) # create our focus_calibration object
@@ -329,7 +317,7 @@ def GUI_window():
                     loc_xlsx = values['config_file_loc']
                     [where_network, where_serdes, AreaList, number_of_images] = excel_read_config(loc_xlsx)
                     viewing = View(window, where_network)
-                    # print('before play command')
+                    print('before play command')
                     viewing.Play()  # actually play
                     SSH_session = viewing.OpenSSH()  # get SSH
 
