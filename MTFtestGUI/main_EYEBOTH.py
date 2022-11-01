@@ -275,7 +275,6 @@ def GUI_window():
             where_network = values["targ_address"]
             where_serdes = values["serdes_path"]
             viewing = View(window, where_network)
-            print('before play command')
             viewing.Play()  # actually play
             SSH_session = viewing.OpenSSH() #get SSH
 
