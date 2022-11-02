@@ -11,6 +11,7 @@ from datetime import datetime
 from zaber_motion import Library
 import pandas as pd
 import json
+import threading
 
 # note for first run on new computer: RUN ZABER LAUNCHER FIRST OR YOU WILL GET WIERDO ERRORS
 # make sure zaber has a database
@@ -73,19 +74,16 @@ def excel_read_config(loc_config):
     # note: first ROW is Vera number and is not used! it starts counting from the first int in row 2, which is #0 in this data structure
     address = str(df.values[0])
     address = address[2:-2] #we do this to get rid of the [' '] from np array
+    print(address)
     serdes_home = str(df.values[1])
     serdes_home = serdes_home [2:-2]
     input_focus_one = float(df.values[2])
     input_stage_one_near = float(df.values[3])
     input_stage_one_far = float(df.values[4])
-    input_focus_two = float(df.values[5])
-    input_stage_two_near = float(df.values[6])
-    input_stage_two_far = float(df.values[7])
     num_picts = float(df.values[8])
     CloseArea = ImageArea(input_stage_one_near, input_focus_one, input_stage_one_far)
-    FarArea = ImageArea(input_stage_two_near, input_focus_two, input_stage_two_far)
-    AreaList = [CloseArea, FarArea]
-    print(num_picts) #fixme we don't want to print this forever - remove when things function
+    #FarArea = ImageArea(input_stage_two_near, input_focus_two, input_stage_two_far)
+    AreaList = [CloseArea, ] # FarArea]
     return address, serdes_home, AreaList, num_picts
 
 class FocusStuff:
@@ -182,7 +180,7 @@ class ImagesAndStage:
         self.tcp = "tcp://" + where_network + ":5558"
         self.focus = FocusStuff(SSH_session, focus_path, where_serdes)
         # GO take our pictures
-        self.capture()
+        #self.capture()
 
     def save_image(self, current_focal_distance, current_location):
         # makes a file name using the test title & a timestamp
@@ -257,16 +255,22 @@ class View:
         counter = 0
         while (vid.isOpened()):
             ret, frame = vid.read()
-            frame = cv2.resize(frame, (1164, 872))  # downscale ahead of time
+            #handle no frames
+            if not ret:
+                break
+
+            ## downscale and add image
+            frame = cv2.resize(frame, (2048, 872))  # downscale ahead of time
             if counter == 0:
                 overlay_obj = PositionOverlay(frame, counter)
             else:
                 overlay_obj.image = frame
             overlay_obj.AddOverlay()
             counter += 1
+
             if ret == True:
                 cv2.imshow('Frame', overlay_obj.image)
-                cv2.waitKey(40) #25fps so we don't eat alllllll the resources
+                cv2.waitKey(1)
 
 
     def OpenSSH(self):
@@ -278,30 +282,35 @@ class View:
         s = paramiko.SSHClient()  #https://stackoverflow.com/questions/373639/running-interactive-commands-in-paramiko
         #https://stackoverflow.com/questions/13851846/paramiko-sftpclient-setting-missing-host-key-policy
         s.set_missing_host_key_policy(paramiko.AutoAddPolicy())  # this allows us to nlot worry about missing key
+        print(self.address)
         s.connect(self.address, username="vs", password="VSrocks!")
         return s
 
+def ThreadingForOpenCVVideo(window, viewing_object):
+    #print('Starting thread - will sleep for {} seconds'.format(seconds))
+    #time.sleep(seconds)  # sleep for a while
+    viewing_object.Play() #the viewing obj we created earlier
+    window.write_event_value('-THREAD-', '** DONE **')  # put a message into queue for GUI
+
 def GUI_window():
     column_right = [[sg.Text("Select your MTF Test Configuration (distances are in mm)")],
-                    [sg.Button('move target up')],
-                   [sg.Button('move target left'), sg.Button('move target right')],
-                    [sg.Button('move target down')],
                     [sg.Checkbox('Use Config File', default=False, key="config_file_use", enable_events=True),
                      sg.Text("Choose a file: "), sg.FileBrowse(key="config_file_loc")],
                     [sg.Text('Jetson Target (name-here.local without any tcp: or port'), sg.InputText(key="targ_address")],
                     [sg.Text('serdes path starting with a slash /' ), sg.InputText(key="serdes_path")],
-                    [sg.Button("Play Video and Open SSH Connection", key="playandssh")],
                     [sg.Text("Load a JSON focus calibration file"), sg.FileBrowse(key="focus_table_loc")],
                     [sg.Text('Name your test (alpha numeric + underscores only)'), sg.InputText(key="t_title")],
                     [sg.Text("Choose a folder to save in: "), sg.FolderBrowse(key="save_path")],
                     [sg.Text('Focus Distance 1'), sg.InputText(key="fd1")],
                     [sg.Text('Stage Location - Near - Focus Distance One'),  sg.InputText(key="fd1sln")],
                     [sg.Text('Stage Location - Far - Focus Distance One'),  sg.InputText(key="fd1slf")],
-                    [sg.Text('Focus Distance 2'), sg.InputText(key="fd2")],
-                    [sg.Text('Stage Location - Near - Focus Distance Two'), sg.InputText(key="fd2sln")],
-                    [sg.Text('Stage Location - Far - Focus Distance Two'), sg.InputText(key="fd2slf")],
                     [sg.Text('Number of Pictures Per Location'), sg.InputText(key="num_picts_needed")],
-                    [sg.Button("Enter Settings and Commence Test")]]
+                    [sg.Button("Enter Settings and Connect to Stages and Video")],
+                    [sg.Button('move target up')],
+                    [sg.Button('move target left'), sg.Button('move target right')],
+                    [sg.Button('move target down')],
+                    [sg.Text('move stage to distance (x axis'), sg.InputText(key="x_coordinate"), sg.Button('move x axis')],
+                    [sg.Button("Acquire Images")]]
     layout = [[ sg.Column(column_right, element_justification='l')],]
     # cookbook https://pysimplegui.readthedocs.io/en/latest/cookbook/#getting-started-copy-these-design-patterns
 
@@ -312,22 +321,11 @@ def GUI_window():
         event, values = window.read()
         #print(event, values)
 
-        if event == "playandssh":
-            print('play video pressed')
-            where_network = values["targ_address"]
-            where_serdes = values["serdes_path"]
-            viewing = View(window, where_network)
-            viewing.Play()  # actually play
-            SSH_session = viewing.OpenSSH() #get SSH
-
-
-            #print('supposedly playing')
-
         if event == "config_file_use":
             if values['config_file_use'] is True:
                 # if we are using the config file b/c the checkbox is checked
                 # disable GUI we aren't using so we don't confuse people
-                input_fields_config = ["fd1", "fd1sln", "fd1slf", "fd2", "fd2sln", "fd2slf", "num_picts_needed", "targ_address", "serdes_path", "playandssh"]
+                input_fields_config = ["fd1", "fd1sln", "fd1slf", "num_picts_needed", "targ_address", "serdes_path"]
                 for element_key in input_fields_config:
                     #window[element_key].Update(disabled=True)  # update all those fields to disabled
                     window.Element(element_key).Update(disabled=True)
@@ -335,56 +333,94 @@ def GUI_window():
 
 
             if values['config_file_use'] is False:
-                input_fields_config = ["fd1", "fd1sln", "fd1slf", "fd2", "fd2sln", "fd2slf", "num_picts_needed"]
+                input_fields_config = ["fd1", "fd1sln", "fd1slf", "num_picts_needed", "targ_address", "serdes_path"]
                 for element_key in input_fields_config:
                     window.Element(element_key).Update(disabled=False)  # update all those fields to disabled
                 window.Element("config_file_loc").Update(disabled=True)
 
-        if event == "config_file_loc":  #and values['config_file_use'] is True:  # if we then press the browse button, we load values
-            pass
 
-        if event == "manual_y_location_set":
-            pass
 
-        if event == "Enter Settings and Commence Test":
-           # focus_calibration = FocusStuff((values['focus_table_loc'])) # create our focus_calibration object
-            focus_calibration_table = values['focus_table_loc']
-            test_title = values["t_title"]
-            save_to = values["save_path"]
 
+        if event == "Enter Settings and Connect to Stages and Video":
             if values['config_file_use'] is True:  # if the checkbox is checked, we are using the config file
                 if values['config_file_loc'] == '':  # you haven't loaded a file if it's an empty string
                     print('you need to load a config file before we can do anything')
-                else:   # if you have loaded a file, the path will not me an empty string, so we can use an else
+                else:  # if you have loaded a file, the path will not me an empty string, so we can use an else
                     loc_xlsx = values['config_file_loc']
                     [where_network, where_serdes, AreaList, number_of_images] = excel_read_config(loc_xlsx)
-                    viewing = View(window, where_network)
-                    print('before play command')
-                    viewing.Play()  # actually play
-                    SSH_session = viewing.OpenSSH()  # get SSH
 
             elif values["config_file_use"] is False:  # if the checkbox is not checked, we are entering values by hand
+
+                number_of_images = int(values["num_picts_needed"])
+                where_network = values["targ_address"]
+                where_serdes = values["serdes_path"]
+                # location stuff
                 input_focus_one = values["fd1"]
                 input_stage_one_near = values["fd1sln"]
                 input_stage_one_far = values["fd1slf"]
-                input_focus_two = values["fd2"]
-                input_stage_two_near = values["fd2sln"]
-                input_stage_two_far = values["fd2slf"]
-                number_of_images = int(values["num_picts_needed"])
                 CloseArea = ImageArea(input_stage_one_near, input_focus_one, input_stage_one_far)
-                FarArea = ImageArea(input_stage_two_near, input_focus_two, input_stage_two_far)
-                AreaList = [CloseArea, FarArea]
+                AreaList = [CloseArea, ]  # , FarArea]
+
+            focus_calibration_table = values['focus_table_loc']
+            test_title = values["t_title"]
+            save_to = values["save_path"]
+            # focus_calibration = FocusStuff((values['focus_table_loc'])) # create our focus_calibration object
+
+            viewing = View(window, where_network)
+            print("before im_stage_obj")
+            # viewing.Play()  # actually play
+            threading.Thread(target=ThreadingForOpenCVVideo, args=(window, viewing,), daemon=True).start()
+            SSH_session = viewing.OpenSSH()  # get SSH
+            print("before im_stage_obj")
+            im_stage_obj = ImagesAndStage(test_title, save_to, where_network, AreaList, SSH_session, number_of_images,focus_calibration_table, where_serdes)
 
 
 
-            ImagesAndStage(test_title, save_to, where_network,  AreaList, SSH_session, number_of_images, focus_calibration_table, where_serdes)
+        if event == "Acquire Images":
+            im_stage_obj.capture()
+
+        if event == 'move target up':
+            # max is BOTTOM
+            xyz = im_stage_obj.xyz_stage
+            if xyz.z.get_current_location() <= (xyz.z.get_min()+1):
+                print("can't go further, currently at " + str(xyz.z.get_current_location()) + " and min is " + str(xyz.z.get_min()))
+            else:
+                xyz.z.move_to(xyz.z.get_current_location() - 1)
+
+
+        if event == 'move target down':
+            #max is BOTTOM
+            xyz = im_stage_obj.xyz_stage
+            if xyz.z.get_current_location() >= (xyz.z.get_max() - 1):
+                print("can't go further, currently at " + str(xyz.z.get_current_location()) + " and max is " + str(xyz.z.get_max()))
+            else:
+                xyz.z.move_to(xyz.z.get_current_location() + 1)
+
+        if event == 'move target left':
+            #max is right
+            xyz = im_stage_obj.xyz_stage
+            if xyz.y.get_current_location() <= (xyz.y.get_min() +1):
+                print("can't go further, currently at " + str(xyz.y.get_current_location()) + " and min is " + str(xyz.y.get_min()))
+            else:
+                xyz.y.move_to(xyz.y.get_current_location() - 1)
+
+        if event == 'move target right':
+            #max is right
+            xyz = im_stage_obj.xyz_stage
+            if xyz.y.get_current_location() >= (xyz.y.get_max() - 1):
+                print("can't go further, currently at " + str(xyz.y.get_current_location()) + " and max is " + str(xyz.y.get_max()))
+            else:
+                xyz.y.move_to(xyz.y.get_current_location() + 1)
+
+        if event == 'move x axis':
+            im_stage_obj.move_stage(float(values["x_coordinate"]))
 
         if event == sg.WIN_CLOSED:
             if 'SSH_session' in locals():
-                 SSH_session.logout()
+                 #SSH_session.logout() #fixme this needs to be different bc paramiko
+                 pass
             window.close()
             return
-
 # call the window!!
 #f __name__ == '__main_EYEBOTH__':
 GUI_window()
