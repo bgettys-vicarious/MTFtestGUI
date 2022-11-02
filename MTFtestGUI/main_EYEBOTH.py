@@ -2,13 +2,8 @@
 #this version does not include automated camera bring up - it will work if eyeboth is functional
 import os
 import time
-#import serdes
-import vlc
-#import pexpect
-#from pexpect import pxssh
+import cv2
 import paramiko
-import paramiko_expect
-
 import numpy as np
 from zaber_drive import gauntry
 import PySimpleGUI as sg
@@ -32,6 +27,45 @@ class ImageArea:
         self.near = float(near)
         self.focal = float(focal)
         self.far = float(far)
+
+class PositionOverlay:
+    def __init__(self, input_img, counter):
+        self.image = input_img
+        if counter == 0: #ensures this happens only on the first frame for speed
+            self.CalculateOverlay()
+        else:
+            pass
+
+    def CalculateOverlay(self):
+        # #calculate the grid overlay in real time (this assumes side-by-side images)
+        self.height = self.image.shape[0]
+        self.center_height = .5 * self.height
+        self.seventy_on_center_height = .7*self.center_height
+        self.top_line_height= self.center_height - self.seventy_on_center_height
+        self.bottom_line_height = self.center_height + self.seventy_on_center_height
+
+        self.width = self.image.shape[1]
+        self.one_side_width = .5*self.width
+        self.center_one_side_width = .5*self.one_side_width
+        self.seventy_on_center_width = .7*self.center_one_side_width
+        self.left_img_left_side_width = self.center_one_side_width - self.seventy_on_center_width
+        self.left_img_right_side_width = self.center_one_side_width + self.seventy_on_center_width
+        self.right_img_left_side_width = self.one_side_width + self.center_one_side_width - self.seventy_on_center_width  #offset to account for second image
+        self.right_img_right_side_width = self.one_side_width + self.center_one_side_width + self.seventy_on_center_width
+
+    def AddOverlay(self):
+        top_horiz_line = cv2.line(self.image, (0, int(self.top_line_height)), (int(self.width),int(self.top_line_height)), (255, 0, 0), 1)
+        bottom_horiz_line =  cv2.line(self.image, (0, int(self.bottom_line_height)), (int(self.width),int(self.bottom_line_height)), (255, 0, 0), 1)
+
+        left_img_left_line = cv2.line(self.image, ( int(self.left_img_left_side_width), 0), (int(self.left_img_left_side_width),int(self.height)), (255, 0, 0), 1)
+        left_img_right_line = cv2.line(self.image, ( int(self.left_img_right_side_width), 0), (int(self.left_img_right_side_width),int(self.height)), (255, 0, 0), 1)
+        left_img_left_line = cv2.line(self.image, ( int(self.right_img_left_side_width), 0), (int(self.right_img_left_side_width),int(self.height)), (255, 0, 0), 1)
+        left_img_right_line = cv2.line(self.image, ( int(self.right_img_right_side_width), 0), (int(self.right_img_right_side_width),int(self.height)), (255, 0, 0), 1)
+
+        center_horiz =  cv2.line(self.image, (0, int(self.center_height)), (int(self.width),int(self.center_height)), (0, 0, 255), 1)
+        center_vert_left =  cv2.line(self.image, ( int(self.center_one_side_width), 0), (int(self.center_one_side_width),int(self.height)), ( 0, 0, 255), 1)
+        center_vert_right = cv2.line(self.image, ( int(self.center_one_side_width + self.one_side_width), 0), (int(self.center_one_side_width + self.one_side_width),int(self.height)), ( 0, 0, 255), 1)
+
 
 
 def excel_read_config(loc_config):
@@ -217,17 +251,23 @@ class View:
 
 
     def Play(self):
+        # error handling https://www.geeksforgeeks.org/python-play-a-video-using-opencv/
         address_stream = 'tcp://' + self.address + ':5558'  # no slashes in your input or else this will error #fixme needs error handling
-        # cookbook for reference https://github.com/PySimpleGUI/PySimpleGUI/blob/master/DemoPrograms/Demo_Media_Player_VLC_Based.py
-        # https://stackoverflow.com/questions/9372672/how-does-vlc-py-play-video-stream
+        vid = cv2.VideoCapture(address_stream)
+        counter = 0
+        while (vid.isOpened()):
+            ret, frame = vid.read()
+            frame = cv2.resize(frame, (1164, 872))  # downscale ahead of time
+            if counter == 0:
+                overlay_obj = PositionOverlay(frame, counter)
+            else:
+                overlay_obj.image = frame
+            overlay_obj.AddOverlay()
+            counter += 1
+            if ret == True:
+                cv2.imshow('Frame', overlay_obj.image)
+                cv2.waitKey(40) #25fps so we don't eat alllllll the resources
 
-        vlc_app = vlc.libvlc_new(1, [bytes('--no-xlib', "utf-8")])  # start VLC without a gross error! vlc_app = vlc.Instance() also works
-        player = vlc_app.media_player_new()  # make a player
-        our_video = vlc_app.media_new(address_stream)  # get video going
-        our_video.get_mrl()
-        player.set_media(our_video)  # play it
-        player.set_xwindow(self.window['live_image'].Widget.winfo_id())  # send it to this specific window
-        player.play()
 
     def OpenSSH(self):
         # # connect to the Jetson if we need to
@@ -242,8 +282,10 @@ class View:
         return s
 
 def GUI_window():
-    column_left = [[sg.Image('', size=(1164, 872), key='live_image')]]
     column_right = [[sg.Text("Select your MTF Test Configuration (distances are in mm)")],
+                    [sg.Button('move target up')],
+                   [sg.Button('move target left'), sg.Button('move target right')],
+                    [sg.Button('move target down')],
                     [sg.Checkbox('Use Config File', default=False, key="config_file_use", enable_events=True),
                      sg.Text("Choose a file: "), sg.FileBrowse(key="config_file_loc")],
                     [sg.Text('Jetson Target (name-here.local without any tcp: or port'), sg.InputText(key="targ_address")],
@@ -260,7 +302,7 @@ def GUI_window():
                     [sg.Text('Stage Location - Far - Focus Distance Two'), sg.InputText(key="fd2slf")],
                     [sg.Text('Number of Pictures Per Location'), sg.InputText(key="num_picts_needed")],
                     [sg.Button("Enter Settings and Commence Test")]]
-    layout = [[sg.Column(column_left, element_justification='c'), sg.Column(column_right, element_justification='l')]]
+    layout = [[ sg.Column(column_right, element_justification='l')],]
     # cookbook https://pysimplegui.readthedocs.io/en/latest/cookbook/#getting-started-copy-these-design-patterns
 
     # Create the window
@@ -277,6 +319,7 @@ def GUI_window():
             viewing = View(window, where_network)
             viewing.Play()  # actually play
             SSH_session = viewing.OpenSSH() #get SSH
+
 
             #print('supposedly playing')
 
