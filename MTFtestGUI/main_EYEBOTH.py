@@ -74,7 +74,6 @@ def excel_read_config(loc_config):
     # note: first ROW is Vera number and is not used! it starts counting from the first int in row 2, which is #0 in this data structure
     address = str(df.values[0])
     address = address[2:-2] #we do this to get rid of the [' '] from np array
-    print(address)
     serdes_home = str(df.values[1])
     serdes_home = serdes_home [2:-2]
     input_focus_one = float(df.values[2])
@@ -147,7 +146,7 @@ class FocusStuff:
         focus_value_left = int(focus_values[0])
         focus_value_right = int(focus_values[1])
         command_to_send = 'sudo python3 ' + self.serdes_path + ' set_focus:{},{}'.format(focus_value_left, focus_value_right)
-        print(command_to_send)
+        print("Command sent: " + command_to_send)
         ssh_stdin, ssh_stdout, ssh_stderr = self.SSH.exec_command(command_to_send)
         output = ssh_stdout.read()
         if 'with args' in str(output):
@@ -159,10 +158,9 @@ class FocusStuff:
 
 class ImagesAndStage:
     # feed me LIST of each location you'd like to take a picture at FOR A GIVEN FOCAL plane (near limit, focal plane, far limit)
-    def __init__(self, test_title, save_to, where_network, AreaList, SSH_session, num_picts, focus_path, where_serdes):
+    def __init__(self, where_network, AreaList, SSH_session, num_picts, focus_path, where_serdes):
         # gauntry initialization
         self.xyz_stage = gauntry()
-        #removing to make testing faster - needs to go back in
         self.xyz_stage.home()
         # set up with y centered (for now - eventually, do something differe)
         min_y = self.xyz_stage.y.get_min()
@@ -172,8 +170,6 @@ class ImagesAndStage:
         # # set up at arbitrary height (100mm)
         self.xyz_stage.z.move_to(self.xyz_stage.z.get_max())
         # networking support
-        self.title = test_title
-        self.save_loc = str(save_to)
         self.areas = AreaList
         self.repeats = num_picts
         self.SSH_session = SSH_session
@@ -187,12 +183,9 @@ class ImagesAndStage:
         dateTimeObj = datetime.now()
         string_focal_distance = str(current_focal_distance)
         string_location = str(current_location)
-        file_name_current_time =  ('MTF_' + str(self.title) + '_' + dateTimeObj.strftime("%d-%b-%Y-%H-%M-%S") +
-         '_distance_' +"_focused_on_" + string_focal_distance + "_stage_loc_" + string_location + '.png')
+        file_name_current_time =  ('MTF_' + self.title + '_' + dateTimeObj.strftime("%d-%b-%Y-%H-%M-%S") + '_distance_' +"_focused_on_" + string_focal_distance + "_stage_loc_" + string_location + '.png')
         # generate an intelligible file name
-
         command_cap = "ffmpeg -y -i " + self.tcp + " -f image2 -frames:v 1 " + self.save_loc + "/" + file_name_current_time
-        print(self.save_loc)
         os.system(command_cap)
         return file_name_current_time
 
@@ -241,12 +234,14 @@ class ImagesAndStage:
             time.sleep(sleep_time)
         print("done saving")
 
-# play video, open SSH if needed
+    # def manual_capture(self,focal_plane):
+    #     self.focus.set_focus(focal_plane, self.focus.serdes_path)
+    #     self.save_image(focal_plane, focal_plane)
+
 class View:
     def __init__(self, test_window, network_loc):
         self.address = network_loc
         self.window = test_window
-
 
     def Play(self):
         # error handling https://www.geeksforgeeks.org/python-play-a-video-using-opencv/
@@ -260,7 +255,7 @@ class View:
                 break
 
             ## downscale and add image
-            frame = cv2.resize(frame, (2048, 872))  # downscale ahead of time
+            frame = cv2.resize(frame, (1536, 654))  # downscale ahead of time
             if counter == 0:
                 overlay_obj = PositionOverlay(frame, counter)
             else:
@@ -282,7 +277,6 @@ class View:
         s = paramiko.SSHClient()  #https://stackoverflow.com/questions/373639/running-interactive-commands-in-paramiko
         #https://stackoverflow.com/questions/13851846/paramiko-sftpclient-setting-missing-host-key-policy
         s.set_missing_host_key_policy(paramiko.AutoAddPolicy())  # this allows us to nlot worry about missing key
-        print(self.address)
         s.connect(self.address, username="vs", password="VSrocks!")
         return s
 
@@ -293,25 +287,32 @@ def ThreadingForOpenCVVideo(window, viewing_object):
     window.write_event_value('-THREAD-', '** DONE **')  # put a message into queue for GUI
 
 def GUI_window():
-    column_right = [[sg.Text("Select your MTF Test Configuration (distances are in mm)")],
+    column_right = [[ sg.Text('increment (in mm):'), sg.InputText(key='amount_move'),sg.Button('set increment')],
+                    [sg.Button('move target up')],
+                    [sg.Button('move target left'), sg.Button('move target right')],
+                    [sg.Button('move target down')],
+                    [sg.Text('move stage to distance (x axis'), sg.InputText(key="x_coordinate"),
+                     sg.Button('move x axis')],
+                    [sg.Text("manual focal plane set"), sg.InputText(key="focal_plane"), sg.Button('set focal plane')],
+                    [sg.Text("Console Output (For Errors and Logging)")],[sg.Output(size=(50,10), key='-OUTPUT-')],]
+    column_left = [[sg.Text("Select your MTF Test Configuration (distances are in mm)")],
                     [sg.Checkbox('Use Config File', default=False, key="config_file_use", enable_events=True),
                      sg.Text("Choose a file: "), sg.FileBrowse(key="config_file_loc")],
-                    [sg.Text('Jetson Target (name-here.local without any tcp: or port'), sg.InputText(key="targ_address")],
-                    [sg.Text('serdes path starting with a slash /' ), sg.InputText(key="serdes_path")],
+                    [sg.Text('Jetson Target (name-here.local without any tcp: or port'),
+                     sg.InputText(key="targ_address")],
+                    [sg.Text('serdes path starting with a slash /'), sg.InputText(key="serdes_path")],
                     [sg.Text("Load a JSON focus calibration file"), sg.FileBrowse(key="focus_table_loc")],
-                    [sg.Text('Name your test (alpha numeric + underscores only)'), sg.InputText(key="t_title")],
-                    [sg.Text("Choose a folder to save in: "), sg.FolderBrowse(key="save_path")],
+                    #[sg.Checkbox('Manual Image Capture', default=False, key="manual_capture", enable_events=True)],
                     [sg.Text('Focus Distance 1'), sg.InputText(key="fd1")],
                     [sg.Text('Stage Location - Near - Focus Distance One'),  sg.InputText(key="fd1sln")],
                     [sg.Text('Stage Location - Far - Focus Distance One'),  sg.InputText(key="fd1slf")],
                     [sg.Text('Number of Pictures Per Location'), sg.InputText(key="num_picts_needed")],
                     [sg.Button("Enter Settings and Connect to Stages and Video")],
-                    [sg.Button('move target up')],
-                    [sg.Button('move target left'), sg.Button('move target right')],
-                    [sg.Button('move target down')],
-                    [sg.Text('move stage to distance (x axis'), sg.InputText(key="x_coordinate"), sg.Button('move x axis')],
-                    [sg.Button("Acquire Images")]]
-    layout = [[ sg.Column(column_right, element_justification='l')],]
+                    [sg.Text('Name your test (alpha numeric + underscores only)'), sg.InputText(key="t_title")],
+                    [sg.Text("Choose a folder to save in: "), sg.FolderBrowse(key="save_path"),sg.Button('save image (manual)', disabled=True)],
+                    [sg.Button("Acquire Images (automatically)")]]
+    layout = [[sg.Column(column_left, element_justification='l'),sg.Column(column_right, element_justification='c')],]
+    #layout = [sg.Column(column_left, element_justification='l'),sg.Column(column_right, element_justification='r')]
     # cookbook https://pysimplegui.readthedocs.io/en/latest/cookbook/#getting-started-copy-these-design-patterns
 
     # Create the window
@@ -320,6 +321,7 @@ def GUI_window():
     while True:
         event, values = window.read()
         #print(event, values)
+
 
         if event == "config_file_use":
             if values['config_file_use'] is True:
@@ -339,7 +341,30 @@ def GUI_window():
                 window.Element("config_file_loc").Update(disabled=True)
 
 
+        # if event == 'manual_capture':
+        #     if values['manual_capture'] is True:
+        #         input_fields_config2 = ["focal_plane_set"]
+        #         for element_key in input_fields_config2:
+        #             window.Element(element_key).Update(disabled=True)
 
+        if event == "set focal plane":
+            manual_focal_plane = float(values["focal_plane"])
+            im_stage_obj.focus.set_focus(manual_focal_plane, im_stage_obj.focus.serdes_path)
+            window.Element("save image (manual)").Update(disabled=False)
+
+
+        if event == "save image (manual)":
+            im_stage_obj.title = str(values["t_title"])
+            im_stage_obj.save_loc = str(values["save_path"])
+            xyz = im_stage_obj.xyz_stage
+            working_distance = xyz.x.get_max() - xyz.x.get_current_location()
+            if 'manual_focal_plane' in locals():
+                im_stage_obj.save_image(manual_focal_plane, working_distance)
+            else:
+                print("you haven't focused yet, please try again")
+
+        if event == 'move x axis':
+            im_stage_obj.move_stage(float(values["x_coordinate"]))
 
         if event == "Enter Settings and Connect to Stages and Video":
             if values['config_file_use'] is True:  # if the checkbox is checked, we are using the config file
@@ -362,58 +387,57 @@ def GUI_window():
                 AreaList = [CloseArea, ]  # , FarArea]
 
             focus_calibration_table = values['focus_table_loc']
-            test_title = values["t_title"]
-            save_to = values["save_path"]
             # focus_calibration = FocusStuff((values['focus_table_loc'])) # create our focus_calibration object
 
             viewing = View(window, where_network)
-            print("before im_stage_obj")
             # viewing.Play()  # actually play
             threading.Thread(target=ThreadingForOpenCVVideo, args=(window, viewing,), daemon=True).start()
             SSH_session = viewing.OpenSSH()  # get SSH
-            print("before im_stage_obj")
-            im_stage_obj = ImagesAndStage(test_title, save_to, where_network, AreaList, SSH_session, number_of_images,focus_calibration_table, where_serdes)
-
-
+            im_stage_obj = ImagesAndStage(where_network, AreaList, SSH_session, number_of_images,focus_calibration_table, where_serdes)
 
         if event == "Acquire Images":
+            im_stage_obj.title = str(values["t_title"])
+            im_stage_obj.save_loc = str(values["save_path"])
             im_stage_obj.capture()
 
-        if event == 'move target up':
-            # max is BOTTOM
-            xyz = im_stage_obj.xyz_stage
-            if xyz.z.get_current_location() <= (xyz.z.get_min()+1):
-                print("can't go further, currently at " + str(xyz.z.get_current_location()) + " and min is " + str(xyz.z.get_min()))
-            else:
-                xyz.z.move_to(xyz.z.get_current_location() - 1)
+        if event == "set increment":
+            motion_increment = float(values['amount_move'])
 
+        if 'motion_increment' not in locals():
+            motion_increment = float(1) #default to 1 mm increments unless stated otherwise
 
         if event == 'move target down':
+            # max is BOTTOM
+            xyz = im_stage_obj.xyz_stage
+            if xyz.z.get_current_location() <= (xyz.z.get_min()+motion_increment):
+                print("can't go further, currently at " + str(xyz.z.get_current_location()) + " and min is " + str(xyz.z.get_min()))
+            else:
+                xyz.z.move_to(xyz.z.get_current_location() - motion_increment)
+
+        if event == 'move target up':
             #max is BOTTOM
             xyz = im_stage_obj.xyz_stage
-            if xyz.z.get_current_location() >= (xyz.z.get_max() - 1):
+            if xyz.z.get_current_location() >= (xyz.z.get_max() - motion_increment):
                 print("can't go further, currently at " + str(xyz.z.get_current_location()) + " and max is " + str(xyz.z.get_max()))
             else:
-                xyz.z.move_to(xyz.z.get_current_location() + 1)
-
-        if event == 'move target left':
-            #max is right
-            xyz = im_stage_obj.xyz_stage
-            if xyz.y.get_current_location() <= (xyz.y.get_min() +1):
-                print("can't go further, currently at " + str(xyz.y.get_current_location()) + " and min is " + str(xyz.y.get_min()))
-            else:
-                xyz.y.move_to(xyz.y.get_current_location() - 1)
+                xyz.z.move_to(xyz.z.get_current_location() + motion_increment)
 
         if event == 'move target right':
             #max is right
             xyz = im_stage_obj.xyz_stage
-            if xyz.y.get_current_location() >= (xyz.y.get_max() - 1):
+            if xyz.y.get_current_location() <= (xyz.y.get_min() + motion_increment):
+                print("can't go further, currently at " + str(xyz.y.get_current_location()) + " and min is " + str(xyz.y.get_min()))
+            else:
+                xyz.y.move_to(xyz.y.get_current_location() - motion_increment)
+
+        if event == 'move target left':
+            #max is right
+            xyz = im_stage_obj.xyz_stage
+            if xyz.y.get_current_location() >= (xyz.y.get_max() - motion_increment):
                 print("can't go further, currently at " + str(xyz.y.get_current_location()) + " and max is " + str(xyz.y.get_max()))
             else:
-                xyz.y.move_to(xyz.y.get_current_location() + 1)
+                xyz.y.move_to(xyz.y.get_current_location() + motion_increment)
 
-        if event == 'move x axis':
-            im_stage_obj.move_stage(float(values["x_coordinate"]))
 
         if event == sg.WIN_CLOSED:
             if 'SSH_session' in locals():
@@ -421,6 +445,9 @@ def GUI_window():
                  pass
             window.close()
             return
+
+        ###https: // www.pysimplegui.org / en / latest / cookbook /  # recipe-printing-24-print-to-output-element
+        ###add print element here!!
 # call the window!!
 #f __name__ == '__main_EYEBOTH__':
 GUI_window()

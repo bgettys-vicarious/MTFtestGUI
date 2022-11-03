@@ -43,6 +43,8 @@ class axis:
 		return self.ax.settings.get("limit.max", Units.LENGTH_MILLIMETRES)
 	def get_min(self):
 		return self.ax.settings.get("limit.min", Units.LENGTH_MILLIMETRES)
+	def get_current_location(self):
+		return self.ax.get_position(Units.LENGTH_MILLIMETRES)
 class gauntry:
 	def __init__(self, _async=False):
 		connection = Connection.open_serial_port(PORT)
