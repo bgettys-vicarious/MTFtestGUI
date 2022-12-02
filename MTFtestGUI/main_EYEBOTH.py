@@ -293,8 +293,8 @@ def GUI_window():
                     [sg.Button('move target down')],
                     [sg.Text('move stage to distance (x axis'), sg.InputText(key="x_coordinate"),
                      sg.Button('move x axis')],
-                    [sg.Text("manual focal plane set"), sg.InputText(key="focal_plane"), sg.Button('set focal plane')],
-                    [sg.Text("Console Output (For Errors and Logging)")],[sg.Output(size=(50,10), key='-OUTPUT-')],]
+                    [sg.Text("manual focal plane set"), sg.InputText(key="focal_plane"), sg.Button('set focal plane')],]
+                   # [sg.Text("Console Output (For Errors and Logging)")],[sg.Output(size=(50,10), key='-OUTPUT-')],]
     column_left = [[sg.Text("Select your MTF Test Configuration (distances are in mm)")],
                     [sg.Checkbox('Use Config File', default=False, key="config_file_use", enable_events=True),
                      sg.Text("Choose a file: "), sg.FileBrowse(key="config_file_loc")],
